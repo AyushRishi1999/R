@@ -1,0 +1,61 @@
+if (!require('tidyverse')) install.packages('tidyverse', quiet = TRUE); library('tidyverse')
+if (!require('skimr')) install.packages('skimr', quiet = TRUE); library('skimr')
+if (!require('h2o')) install.packages('h2o', quiet = TRUE); library('h2o')
+if (!require('DALEXtra')) install.packages('DALEXtra', quiet = TRUE); library('DALEXtra')
+
+# Read RDS post processed file
+processed_youtube_df <- readRDS("processed_youtube_ml.rds")
+
+# Initialize H2O
+h2o.init()
+
+# Push data to H2O
+data_h2o_no_destination <- as.h2o(processed_youtube_df)
+
+# Partition the data into training and validation
+splits <- h2o.splitFrame(data = data_h2o_no_destination, seed = 1234, ratios = c(0.8))
+train_h2o <- splits[[1]]
+valid_h2o <- splits[[2]]
+rm(splits)
+train_h2o
+y <- "Duration_Minutes" # Outcome
+x <- setdiff(names(train_h2o), y) # Predictors
+
+# Hyper parameter grid
+hyper_params <- list(ntrees = c(50, 100, 200),
+                     learn_rate = c(0.01, 0.05, 0.1),
+                     max_depth = c(3, 5, 7))
+
+# Search criteria
+search_criteria <- list(strategy = "RandomDiscrete", max_models = 10)
+
+# Train GBM model with grid search
+gbm <- h2o.grid(
+  algorithm = "gbm",
+  grid_id = "gbm_grid.h2o",
+  x = x,
+  y = y,
+  training_frame = train_h2o,
+  validation_frame = valid_h2o,
+  hyper_params = hyper_params,
+  search_criteria = search_criteria
+)
+rm(hyper_params)
+rm(search_criteria)
+
+# Best model
+best_gbm <- h2o.getModel(gbm@model_ids[[1]])
+summary(best_gbm)
+
+best_model_gbm <- h2o.gbm(
+  
+)
+
+h2o.saveModel(object = gbm, # the model you want to save
+              path = getwd(), # the folder to save
+              force = TRUE) # whether to overwrite an existing file
+model_filepath = str_c(getwd(), "/gbm_grid_model_1") #dl_model_first is model_id
+model_gbm <- h2o.loadModel(model_filepath)
+
+# Shutdown H2O
+h2o.shutdown(prompt=FALSE)

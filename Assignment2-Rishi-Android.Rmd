@@ -1,0 +1,237 @@
+---
+title: "Assignment2-Rishi-Android"
+author: "Ayush Rishi"
+date: "2024-03-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# **Topic Description**
+
+Android is my topic which is an operating system used in almost all the smart devices across the world. Here we have following details:
+
+-   Link - <https://github.com/topics/android>
+
+-   Repositories - We have total 115,766 public repositories.
+
+-   Followers - We have total 146K followers.
+
+-   Released Date - September 23, 2008
+
+-   Filter Options - There are many filter options available such as Language, sort List of Required.
+
+## Libraries for exceution
+
+```{r}
+library(httr)
+library(jsonlite)
+library(magrittr)
+library(gh)
+library(purrr)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(lubridate)
+library(ggplot2)
+library(ggthemes)
+library(tidyr)
+```
+
+## **Fetching 100 repos from Android**
+
+```{r}
+gitKey = "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"
+Sys.setenv(GITHUB_PAT = gitKey)
+response = gh("/search/repositories?q=topic:android",.limit = 100)
+```
+
+## **Table with columns name as full_name, created_at, size, language, topics in items sorted by size in descending order**
+
+```{r}
+df <- map_df(
+  response$items,
+  ~ tibble(
+    full_name = .x$full_name,
+    created_at = .x$created_at,
+    size = .x$size,
+    language = .x$language,
+    topics = paste(.x$topics, collapse = ", ")
+  )
+) %>%
+arrange(desc(size))
+
+df <- slice(df, 1:10)
+num_columns <- ncol(df)
+column_width <- "4cm"
+ 
+column_widths <- rep(column_width, num_columns)
+kable(df, format = "html", 
+      align = "c", caption = "Top 10 Repository sorted by size", escape = FALSE, row.names = FALSE) %>%
+  kable_styling(full_width = TRUE, bootstrap_options = c("striped", "hover", "condensed", "responsive"), position = "center") %>%
+  column_spec(column = 1:num_columns, width = column_widths)
+```
+
+## **Fetching 100 Owners details through login**
+
+```{r}
+repos <- response$items
+Owner_Summary <- function(repos) {
+  owner_login <- repos$owner$login
+  owner_info <- gh("/users/{login}", login = owner_login)
+  data.frame(
+    login = owner_login,
+    public_repos = owner_info$public_repos,
+    created_at = owner_info$created_at,
+    followers = owner_info$followers
+  )
+}
+owners_data <- map_df(repos, Owner_Summary)
+```
+
+## **Table with columns name as login, public_repos(count), created_at(of the user), followers(count) in Owner sorted by public_repos in descending order**
+
+```{r}
+unique_owners_data <- owners_data %>%
+  distinct(login, .keep_all = TRUE)
+
+sorted_owners_data <- unique_owners_data %>%
+  arrange(desc(public_repos)) %>%
+  head(10)
+
+kable(sorted_owners_data, format = "html", 
+      align = "c", caption = "Top 10 Owners sorted by Public_repos", 
+      col.names = c("login", "public_repos", "created_at", "followers"),
+      escape = FALSE, 
+      row.names = FALSE) %>%
+  kable_styling(full_width = TRUE, bootstrap_options = c("striped", "hover", "condensed", "responsive"), position = "center")
+```
+
+## **Fetching 100 issues from Android**
+
+```{r}
+issue_data <- list()
+
+# Iterate through the repositories and retrieve issue data
+for (repo in response$items) {
+  owner <- repo$owner$login
+  repo_name <- repo$name
+  
+  
+  # Retrieve issue data for the repository
+  issues <- gh(paste0("/repos/", owner, "/", repo_name, "/issues"), state = "closed")
+  if (length(issues) > 0) {
+    most_recent_issue <- issues[[1]]
+    title <- most_recent_issue$title
+    created_at <- most_recent_issue$created_at
+    closed_at <- most_recent_issue$closed_at
+    days_to_close <- as.numeric(difftime(closed_at, created_at, units = "days"))
+    issue_info <- data.frame(
+      full_name = paste(owner, "/", repo_name),
+      title = title,
+      created_at = created_at,
+      closed_at = closed_at,
+      days_to_close <- as.integer(difftime(closed_at, created_at, units = "days"))
+    )
+    issue_data[[paste(owner, "/", repo_name)]] <- issue_info
+  }
+}
+issue_data_df <- do.call(rbind, issue_data)
+```
+
+## **Table with columns name as full_name, title(of the issue), created_at, closed_at, days_to_close (the difference created_at and closed_at in days) for Issue sorted by days_to_close in ascending order**
+
+```{r}
+issue_data_df <- slice(issue_data_df, 1:10)
+
+issue_data_df <- issue_data_df[order(issue_data_df$days_to_close), ]
+
+kable(issue_data_df, format = "html", 
+      align = "c", caption = "Top 10 Issue sorted Ascending by days_to_close", 
+      col.names = c("full_name", "title", "created_at", "closed_at", "days_to_close"),
+      escape = FALSE, 
+      row.names = FALSE) %>%
+  kable_styling(full_width = TRUE, bootstrap_options = c("striped", "hover", "condensed", "responsive"), position = "center")
+```
+
+## **Bar Plot of top 5 other topics with respect to Android**
+
+```{r}
+item <- response$items
+topics <- lapply(item, function(repo) repo$topics)
+
+topics <- unlist(topics)
+topics_freq <- table(topics)
+sorted_topics_freq <- sort(topics_freq, decreasing = TRUE)
+
+top_Topics_Occur <- names(sorted_topics_freq)[!grepl("^Android",names(sorted_topics_freq))][2:6]
+
+data_Occur <- data.frame(
+  topic = top_Topics_Occur,
+  frequency = sorted_topics_freq[top_Topics_Occur]
+)
+data_Occur$frequency.Freq <- as.numeric(data_Occur$frequency.Freq)
+
+ggplot(data_Occur, aes(x = reorder(topic, -frequency.Freq), y = frequency.Freq)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  geom_text(aes(label=frequency.Freq), vjust=1.6, color="white", size=3.5)+
+  labs(
+    x = "Topic",
+    y = "Frequency",
+    title = "Top 5 Other Topics similar to 'Android'",
+    subtitle = "Frequency Occurance",
+  )  +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## **Above Bar Plot Description**
+
+-   The above graph shows the 5 other topics that most frequently occur with the topic selected which is covid-19 and are sorted in descending order by frequency. Below are the name of 5 topics:
+
+    -   **ios** - Frequency of occurrence is 35
+
+    -   **java** - Frequency of occurrence is 17
+
+    -   **cross-platform** - Frequency of occurrence is 12
+
+    -   **javascript** - Frequency of occurrence is 12
+
+    -   **Kotlin -** Frequency of occurrence is 12
+
+## **Line Chart showing the trend of number of repos created each year**
+
+```{r}
+years <- sapply(response$items, function(repo) as.integer(substr(repo$created_at, 1, 4)))
+year_counts <- data.frame(year = unlist(years))
+min_year <- min(year_counts$year) 
+max_year <- max(year_counts$year)  
+all_years <- data.frame(year = min_year:max_year)
+year_counts <- year_counts %>%
+  complete(year = all_years$year) %>%
+   group_by(year) %>%
+  summarise(count = n())
+y_breaks <- seq(0, max(year_counts$count), by = 8)
+ggplot(year_counts, aes(x = year, y = count)) +
+  geom_line() +
+  geom_text(aes(label=count), vjust=1.6, color="black", size=3.5)+
+  labs(
+    title = "Number of Repositories Created Each Year",
+    x = "Year",
+    y = "Repository Count"
+  ) +
+  scale_x_continuous(breaks = unique(year_counts$year)) +
+  scale_y_continuous(breaks = y_breaks)
+```
+
+## **Above Line Chart Description**
+
+-   The above line shows the trend of the number of repos created each year
+
+    -   **Year with Highest created Repo** - In **2016** 17 repos are created
+
+    -   **Year with Lowest created Repo** - In **2023** only 1 repo is created
+
+    -   **Information about other years** - In **2014** 15 repos and in **2017** 14 repos are created

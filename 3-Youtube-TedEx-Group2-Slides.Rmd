@@ -1,0 +1,355 @@
+---
+title: "Youtube-TedEx"
+author: "Group 2"
+date: "2024-04-22"
+output:
+  slidy_presentation: default
+---
+```{r setup, include=FALSE}
+
+if (!require('tidyverse')) install.packages('tidyverse', quiet = TRUE); library('tidyverse')
+if (!require('kableExtra')) install.packages('kableExtra', quiet = TRUE); library('kableExtra')
+if (!require('ggplot2')) install.packages('ggplot2', quiet = TRUE); library('ggplot2')
+if (!require('ggthemes')) install.packages('ggthemes', quiet = TRUE); library('ggthemes')
+if (!require('skimr')) install.packages('skimr', quiet = TRUE); library('skimr')
+#if (!require('plot3D')) install.packages('plot3D', quiet = TRUE); library('plot3D')
+if (!require('viridis')) install.packages('viridis', quiet = TRUE); library('viridis')
+if (!require('wordcloud')) install.packages('wordcloud', quiet = TRUE); library('wordcloud')
+if (!require('gganimate')) install.packages('gganimate', quiet = TRUE); library('gganimate')
+if (!require('scales')) install.packages('scales', quiet = TRUE); library('scales')
+if (!require('kableExtra')) install.packages('kableExtra', quiet = TRUE); library('kableExtra')
+if (!require('plotly')) install.packages('plotly', quiet = TRUE); library('plotly')
+if (!require('gridExtra')) install.packages('gridExtra', quiet = TRUE); library('gridExtra')
+if (!require('manipulateWidget')) install.packages('manipulateWidget', quiet = TRUE); library('manipulateWidget')
+if (!require('h2o')) install.packages('h2o', quiet = TRUE); library('h2o')
+if (!require('DALEXtra')) install.packages('DALEXtra', quiet = TRUE); library('DALEXtra')
+if (!require('recipes')) install.packages('recipes', quiet = TRUE); library('recipes')
+h2o.init(min_mem_size = "2G", nthreads=-1)
+```
+
+## Recap of Analytics Plan
+<font size = "4pt"> **Descriptive Statistics**: Analyzed engagement statistics including views, likes, and comments.  
+**Performance and Engagement Metrics**: Compared engagement metrics across categories, video duration, and tags.  
+**Content Analysis**: Utilized topic modeling and keyword extraction to identify themes within the content.  
+**Trend Analysis**: Examined trends in viewership and engagement over time.  
+</font>
+
+<font size = "5pt"> Tools Used:    
+</font>
+<font size = "4pt">- **Data Extraction and Parsing:** tuber, httr, jsonlite, tidyverse, skimr, recipes, dplyr, tidyr, lubridate  
+- **Machine Learning:** h2o   
+- **Visualization:** plotly, ggplot2  
+</font>
+
+## Peer comments Summmary
+- With topic modeling, analysis of engagement data, and examination of high-performing videos, you will be able to find useful tactics for content producers.
+- Include Audience Demographics Analysis and Sentiment Analysis
+- It would be beneficial to include background, exploratory data of what kind of topics are most popular.
+- It may be beneficial to have a type of another education control group
+
+## Data Summary 
+<font size = "4pt"> - The data is extracted using the Tuber Api.    
+- The dataset offers a comprehensive collection of TEDx talks from the TedEx YouTube channel, featuring talks aimed at inspiring, educating, and sparking discussions on various important subjects.   
+- Each entry includes details such as the video ID, publication time, title, description, tags, category ID, default audio language, duration, dimension, caption availability, licensed content status, view count, like count, favorite count, and comment count.    
+- The dataset offers insights into the content and engagement metrics of these TedEx talk videos , showcasing diverse topics and audience responses.  
+</font> 
+```{r echo=FALSE}
+yt_df <- readRDS('processed_youtube_df.rds')
+glimpse(yt_df)
+```
+
+## Data Wrangling  
+<font size = "4pt">  
+- Categorized "Published_Time" to Night, Morning, Afternoon, Evening UTC Day Parts  
+- Extracted day of the week from "Published_Time"  
+- Extracted month from "Published_Time"  
+- Extracted minutes from "Duration"  
+- Pre-processed "Tags" column by removing unnecessary keywords  
+- Removed low variance columns  
+- Excluded videos from the last 3 weeks  
+- Calculated date 3 weeks before max date  
+- Filtered out rows within last 30 days  
+- Separated data for text and non-text models  
+- Factorized categorical variables using recipe and bake  
+- Saved the post-processed data into a .rds format  
+</font>
+
+## Data Exploration
+```{r plot, message=FALSE, warning = FALSE, echo=FALSE}
+
+data_check <- yt_df |> select(-Description)
+
+
+p <- ggplot(data_check, aes(x=View_Count/1e6, 
+                     y=Like_Count/1e3, 
+                     color=factor(Day_Of_Week),
+                     label1 = View_Count,
+                     label2 = Like_Count,
+                     label3 = Day_Of_Week)) +
+  geom_point(size=3) +
+  labs(x = 'Views (in millions )',
+       y = 'Likes (in thousands)',title = 'Scatter plot for views and likes comparison',
+       color = "Days") +
+  theme_bw()
+
+ggplotly(p, tooltip = c("label1", "label2", "label3"))
+
+#Language based bar and pie chart
+language_yt_df <- yt_df |> 
+  group_by(Default_Audio_Language) |>
+  summarise(n = n()) |> 
+  arrange(desc(n)) |> 
+  slice_head(n = 10)
+
+language_lookup <- data.frame(Language_Code = c("ar","en", "es", "fr", "hi","it","pt","ro","tr","zh-CN"),
+                              Language_Name = c("Arabic","English", "Spanish", "French", "Hindi","Italian","Portuguese","Romanian","Turkish","Chinese (PRC)"))
+
+
+language_yt_df <- merge(language_yt_df, language_lookup, by.x = "Default_Audio_Language", by.y = "Language_Code", all.x = TRUE)
+
+#bar chart
+ggplot(language_yt_df) +
+  geom_bar(aes(x = Default_Audio_Language, y = n, fill = Default_Audio_Language), stat = 'identity') +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = 'Language', y = 'Frequency', title = 'Top 10 languages') +
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.text.x = element_text(hjust = 1),
+        legend.title = element_blank()) +
+  scale_fill_discrete(name = "Language", labels = paste(language_yt_df$Default_Audio_Language, ":", language_yt_df$Language_Name))
+
+
+#Tags of most viewed videos
+mvideo <- yt_df |> select(-Description) |> arrange(desc(yt_df$View_Count)) 
+
+top_mvideo <- mvideo[1:10,]
+tag_mvideos <- top_mvideo |>
+    separate_rows(Tags, sep = ",") %>%
+    mutate(tags_col = str_replace_all(Tags, '"', "")) %>%
+    group_by(tags_col) %>%
+    summarise(n = n()) %>%
+    filter(n > 2, !(tags_col %in% c("s", "the", "The", "and", "or", "a", "-", "", "English")))
+
+tg<-ggplot(tag_mvideos) +
+    geom_bar(aes(x=reorder(tags_col, -n), y = n, fill = tags_col,
+                     label1 = tags_col,
+                     label2 = n), stat = 'identity') +
+    labs(x= 'Tags', y = 'Frequency', title = 'Top 5 Tags for most viewed videos') +
+    theme(plot.title = element_text(hjust = 0.5),
+          axis.text.x = element_text(angle = 90, hjust = 1))
+
+ggplotly(tg, tooltip = c("label1", "label2"))
+```
+
+## Data Exploration
+```{r plot-example, message=FALSE, warning = FALSE, echo=FALSE}
+### Daily video uploads:
+days_df <- yt_df |> group_by(Day_Of_Week) |>
+  summarise(n = n())|>
+  mutate(percentage = round(n / sum(n), 2)) |>
+  mutate(label_perc = scales::percent(percentage))
+
+plot_ly(days_df)%>%
+add_pie(days_df,labels=~factor(Day_Of_Week),values=~n,
+		textinfo="label+percent",type='pie',hole=0.3)%>%
+layout(title="Exploring Daily Data",margin = list(t = 50))
+
+#Most uploaded at which time
+
+time_df <- yt_df |> group_by(Utc_Day_Part) |>
+  summarise(n = n()) |>
+  mutate(percentage = n / sum(n)) |>
+  mutate(label_perc = scales::percent(percentage))
+
+plot_ly(time_df)%>%
+add_pie(days_df,labels=~factor(Utc_Day_Part),values=~percentage,
+		textinfo="label+percent",type='pie')%>%
+layout(title="Frequency of Video Upload",
+       showlegend = TRUE, legend = list(title = list(text = "Times of (the) day")),margin = list(t = 50))
+
+```
+
+## Data Exploration
+
+```{r word cloud, message=FALSE, warning = FALSE,echo=FALSE}
+#Top words in tags
+tag_df <- yt_df %>%
+  separate_rows(Tags, sep = ",") %>%
+  mutate(tags = str_replace_all(Tags, '"', "")) %>%
+  group_by(tags) %>%
+  summarise(n = n()) %>%
+  filter(!(tags %in% c("s", "the", "The", "and", "or", "a", "-", "","English")))
+ 
+wordcloud(words = tag_df$tags, freq = tag_df$n, max.words = 100, random.order = FALSE,
+          colors=brewer.pal(6, "Dark2"))
+
+```
+
+## Data Exploration
+```{r Tags based bar chart, message=FALSE, warning = FALSE, echo=FALSE}
+
+# Engagement metrics calculation
+emetrics_df <- yt_df |>
+  select(Like_Count,Comment_Count,View_Count,Duration_Minutes,Utc_Day_Part, Day_Of_Week,) |>
+  mutate(Engagement_Rate = ((Like_Count + Comment_Count) / View_Count) * 100) |>
+  mutate(week_index = case_when(
+    Day_Of_Week == "Monday" ~ 1,
+    Day_Of_Week == "Tuesday" ~ 2,
+    Day_Of_Week == "Wednesday" ~ 3,
+    Day_Of_Week == "Thursday" ~ 4, Day_Of_Week == "Friday" ~ 5, Day_Of_Week == "Saturday" ~ 6, 
+    Day_Of_Week == "Sunday" ~ 7
+    ))
+
+
+  gg<- ggplot(emetrics_df,  aes(x=Duration_Minutes, y=Engagement_Rate, color=Utc_Day_Part)) +
+    geom_line() +
+    geom_point() +
+    scale_color_viridis(discrete = TRUE) +
+    ggtitle("Engagement Rate by Video Duration") +
+    guides(color = guide_legend(title = "Times of (the) day")) +
+    labs("Engagement_Rate")
+
+
+ggplotly(gg)
+
+
+emd <- ggplot(emetrics_df,  aes(x=Day_Of_Week, y=Engagement_Rate, group=Duration_Minutes, color=Duration_Minutes,
+                                label1 = Day_Of_Week,
+                     label2 = Engagement_Rate,
+                     label3 = Duration_Minutes)) +
+    geom_line() +
+    geom_point() +
+    scale_color_viridis(discrete = FALSE) +
+    ggtitle("Daily Engagement Rate") +
+    labs(
+    x = "Days (of week)",
+    y = "Rate of Engagement (in %)",
+    )
+
+
+ggplotly(emd, tooltip = c("label1", "label2", "label3"))
+```
+
+## Show example data and if your ML models involve structured data, demonstrate that you consider at least 20 predictors
+## What tags should I use for my content?  
+- Output: Tags
+- Model: Topic Modeling 
+```{r Topic Modeling, message=FALSE, warning = FALSE, results='hide', echo=FALSE, include=FALSE}
+
+topicModel <- readRDS("4-topic-modeling.rds")
+word_probs <- topicModel %>%
+  group_by(topic) %>%
+  top_n(15, beta) %>%
+  ungroup() %>%
+  mutate(term = fct_reorder(term, beta)) %>%
+  head(50)
+```
+
+``` {r topic plot}
+ggplot(
+  word_probs,
+  aes(term, beta, fill=as.factor(topic))
+) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+## When should I upload my video to boost engagement?  
+- Output: UTC_Day_Part (Factor)  
+- Model: Deeplearning  
+```{r Deeplearning, message=FALSE, warning = FALSE, results='hide', echo=FALSE, include=FALSE}
+dl <- h2o.loadModel("4-dl-model-day-part.h2o")
+```
+
+``` {r dl plot}
+plot(dl)
+```
+
+## What should be the duration length for my video?  
+- Output: Duration_Minutes (Numerical)  
+- Model: Gradient Boosting Machine  
+```{r Gradient Boosting Machine, message=FALSE, warning = FALSE, results='hide', echo=FALSE, include=FALSE}
+gbm <- h2o.loadModel("4-gbm-model-duration.h2o")
+```
+
+``` {r gbm plot}
+plot(gbm)
+```
+
+## XAI
+
+```{r split dl, include=FALSE, results='hide', echo=FALSE, include=FALSE}
+x_train_tbl_dl <- yt_df |> select(-"Utc_Day_Part")
+y_train_tbl_dl <- yt_df |> select("Utc_Day_Part")
+x_train_tbl_gbm <- yt_df |> select(-"Duration_Minutes")
+y_train_tbl_gbm <- yt_df |> select("Duration_Minutes")
+x_test_data <- data.frame(
+  Utc_Day_Part = "Evening",
+  Month = "February",
+  Day_Of_Week = "Friday",
+  Duration_Minutes = 14,
+  Default_Audio_Language = "en",
+  Caption = FALSE,
+  View_Count = 24904,
+  Like_Count = 658,
+  Comment_Count = 50
+)
+
+new_observation_tbl_skim = partition(skim(x_test_data))
+names(new_observation_tbl_skim)
+
+string_2_factor_names_new_observation <- new_observation_tbl_skim$character$skim_variable
+rec_obj_new_observation <- recipe(~ ., data = x_test_data) |>
+  step_string2factor(all_of(string_2_factor_names_new_observation)) |>
+  step_impute_median(all_numeric()) |> # missing values in numeric columns
+  step_impute_mode(all_nominal()) |> # missing values in factor columns
+  prep()
+new_observation_processed_tbl <- bake(rec_obj_new_observation, x_test_data)
+new_application = new_observation_processed_tbl
+```
+
+### Deep Learning XAI CPP
+```{r DL XAI, results = 'hide', warning=FALSE, results='hide', echo=FALSE, include=FALSE}
+h2o_exp_dl = explain_h2o(
+dl, data = x_train_tbl_dl,
+y = y_train_tbl_dl$Utc_Day_Part == 1,
+label = "H2O", type = "classification")
+```
+
+```{r DL CPP, warning=FALSE, results='hide', echo=FALSE, include=FALSE}
+h2o_exp_dl_cp <- predict_profile(
+  explainer = h2o_exp_dl, new_observation = new_application)
+```
+
+```{r DL CPP plot, warning=FALSE}
+plot(h2o_exp_dl_cp, variables = c("View_Count","Duration_Minutes")) +
+ggtitle("View_Count")
+```
+
+## GBM XAI SHAP
+```{r GBM XAI, warning=FALSE, results='hide', echo=FALSE, include=FALSE}
+h2o_exp_gbm = explain_h2o(
+gbm, data = x_train_tbl_gbm,
+y = y_train_tbl_gbm$Duration.Minutes == 10,
+label = "H2O", type = "regression")
+```
+
+```{r GBM SHAP, warning=FALSE, results='hide', echo=FALSE, include=FALSE}
+h2o_exp_gbm_shap <- predict_parts(
+explainer = h2o_exp_gbm, new_observation = new_application,
+type = "shap", B = 5)
+```
+
+```{r GBM SHAP plot, warning=FALSE}
+plot(h2o_exp_gbm_shap) + ggtitle("SHAP explaination")
+```
+
+## Key Takeaways
+- There appears to be no correlation between views and likes, suggesting that the most viewed videos may not necessarily be the most liked ones.
+- English is the most frequently used language for video uploads, followed by Spanish.
+- Videos should be uploaded on weekdays.
+- Videos should be uploaded in the UTC afternoon when most of the population is awake across the globe.
+- The top 10 most viewed videos attract viewership ranging from 5 to 25 million, with duration spanning from approximately 6 to 30 minutes.
+- Tags such as "Life," "Empowerment," "Happiness," "Health," and "Leadership" are popular among the most viewed videos.
+- According to engagement metrics, videos uploaded during the afternoon (UTC) with duration ranging from 10 to 15 minutes tend to receive the highest engagement.  
+- Additionally, the data suggests that videos uploaded on Thursdays generally have the highest engagement rates, followed by those uploaded on Mondays.

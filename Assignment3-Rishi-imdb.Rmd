@@ -1,0 +1,217 @@
+---
+title: "Assignment3-Rishi-imdb"
+author: "Ayush Rishi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, message = FALSE}
+knitr::opts_chunk$set(warning = FALSE , echo = TRUE , message = FALSE)
+```
+
+## Dataset Introductuion
+
+-   [**Title** - IMDB Dataset (Top 2000 movies)]{style="font-size: 18px;"}
+-   [**Link** - "<https://www.kaggle.com/datasets/prishasawhney/imdb-dataset-top-2000-movies/data>"]{style="font-size: 18px;"}
+-   [**Data Summary** - The science of training machines to learn and produce models for future predictions is widely used. Here, IMDB_Rating column is our outcome which contains the information for rating of movies and we will predict the same using other predictors such as Movie_Name, Release_Year, Duration, Metascore, Votes, Genre, Director, Cast and Gross]{style="font-size: 18px;"}
+
+## Kaggle Screenshot for No R code
+
+[Below is the screenshot from Kaggle which tells us that there are no R code available for this Dataset]{style="font-size: 18px;"}
+
+![Alt text](NoRCode.Png)
+
+## Important Libraries
+
+```{r Libraries}
+library(h2o)
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(skimr)
+library(recipes)
+library(kableExtra)
+library(DALEXtra)
+```
+
+## Initialize H2O Model
+
+```{r}
+h2o.init(nthreads = -1)
+```
+
+### Read the processed data
+
+```{r read data}
+yield_data_df = read_csv("Assignment3-Rishi-imdb.csv")
+kable(head(yield_data_df,10)) |> kable_styling(bootstrap_options = c("hover"))
+```
+
+#### Description about dataset
+
+## ***Predictors*** :-
+
+```         
+ - Movie_Name - This column shows the name of each movie.
+ - Release_Year - This column represents the year in which the movie was released.
+ - Duration - This column indicates the length in minutes of the movie.
+ - Metascore - This column represents the score received on a scale of 1-100.
+ - Votes - This column represents the total number of votes given to a specified movie.
+ - Genre - This represents all the genres covered by the specified movie.
+ - Director - This column specifies the director of a specific movie.
+ - Cast - This column specifies the cast in the specified movie.
+ - Gross - This column signifies the gross earnings a movie made i.e. in million dollars
+```
+
+## **Outcome** :-
+
+```         
+ - IMDB_Rating - This column represents the average Rating a specified movie got over time. 
+```
+
+## Split the Independent and dependent variable
+
+[Predictors in x_train_tbl]{style="font-size: 19px;"}
+
+```{r Split the data}
+x_train_tbl <- yield_data_df |> select(-"IMDB_Rating")
+kable(head(x_train_tbl,10)) |> kable_styling(bootstrap_options = c("hover"))
+```
+
+[Outcome in y_train_tbl]{style="font-size: 19px;"}
+
+```{r}
+y_train_tbl <- yield_data_df |> select("IMDB_Rating")
+kable(head(y_train_tbl,10) , align = 'l') |> kable_styling(bootstrap_options = c("hover"))
+```
+
+### Loading the H2O model previously saved and providing the predictive performance of the model.
+
+```{r results = 'hide'}
+saved_model <- h2o.loadModel("Assignment3-Rishi-imdb.h2o")
+```
+
+## Predictive Performance
+
+```{r}
+summary(saved_model)
+```
+
+## Explaination of Predictive Performance
+
+-   [**RMSLE -**]{style="font-size: 20px;"} [The RMSLE is a metric particularly useful when dealing with skewed distributions or large variations in the target variable. A lower RMSLE is desirable, and in both training and validation, the RMSLE values are relatively low (0.016 on training and 0.06 on validation), which is a positive indicator.]{style="font-size: 18px;"}
+
+-   [**Training Metrics -**]{style="font-size: 20px;"} [The model seems to perform well on the training data, as indicated by relatively low values for MSE, RMSE, MAE, and RMSLE. The low training error suggests that the model is capturing the patterns in the training set.]{style="font-size: 18px;"}
+
+# [Conclusion of Predictive Performance:]{style="font-size: 19px;"}
+
+[Based on the metrics, the model appears to be accurate, especially considering the relatively low values of RMSE, MAE, and RMSLE on both the training and validation datasets.]{style="font-size: 20px;"}
+
+### XAI (Expalinable AI)
+
+```{r results = 'hide'}
+h2o_exp = explain_h2o(
+saved_model, data = x_train_tbl,
+y = y_train_tbl$IMDB.Rating == 1,
+label = "H2O", type = "regression")
+```
+
+### <u> Create a new observation </u>
+
+```{r new observation}
+x_test_data <- data.frame(
+  Movie_Name = "Rocky",
+  Release_Year = 1976,
+  Duration = 120,
+  Metascore = 70,
+  Votes = 625924,
+  Genre = "Drama, Sport",
+  Director = "John G. Avildsen",
+  Cast = "Sylvester Stallone",
+  Gross = 117.24
+)
+
+new_observation_tbl_skim = partition(skim(x_test_data))
+names(new_observation_tbl_skim)
+
+string_2_factor_names_new_observation <- new_observation_tbl_skim$character$skim_variable
+rec_obj_new_observation <- recipe(~ ., data = x_test_data) |>
+  step_string2factor(all_of(string_2_factor_names_new_observation)) |>
+  step_impute_median(all_numeric()) |> # missing values in numeric columns
+  step_impute_mode(all_nominal()) |> # missing values in factor columns
+  prep()
+new_observation_processed_tbl <- bake(rec_obj_new_observation, x_test_data)
+new_application = new_observation_processed_tbl
+```
+
+### <u> XAI - Partial-dependence Profiles </u>
+
+```{r results = 'hide'}
+h2o_exp_pdp <- model_profile(
+explainer = h2o_exp, variables = "Metascore")
+```
+
+## Plot display for Partial dependence profiles
+
+```{r}
+plot(h2o_exp_pdp, geom="profiles") +
+ggtitle("Metascore")
+```
+
+### Explaination of Partial-dependence Profiles
+
+-   [Partial dependence plots (PDP) are a valuable tool in understanding the relationship between a feature and the predictions made by a machine learning model. Here, we are using the h2o package to generate partial dependence profiles for the variable "Metascore" in our model.]{style="font-size: 20px;"}
+
+## Plot Summary
+
+-   [**Decreasing Trend:**]{style="font-size: 20px;"} [The plot shows a steady increase in the predicted probability of Metascore prediction as the Metascore is increasing. It makes sense as Metascore affect the ratings directly.]{style="font-size: 18px;"}
+
+-   [**Implication:**]{style="font-size: 20px;"} [The positive slope implies that, according to the model, higher Metascore will result to higher IMDB Rating.]{style="font-size: 18px;"}
+
+-   [**Critical Temperature Thresholds:**]{style="font-size: 20px;"} [By observing graph we can say that rating threshold is approx 4 beyond which the negative impact on Metascore becomes more severe. This helps us in identify that till 4, it will not affect the Metascore in massive way.]{style="font-size: 18px;"}
+
+### <u> XAI - SHAP </u>
+
+```{r results = 'hide'}
+h2o_exp_shap <- predict_parts(
+explainer = h2o_exp, new_observation = new_application,
+type = "shap", B = 5)
+```
+
+## Plot display for SHAP
+
+```{r}
+plot(h2o_exp_shap) + ggtitle("SHAP explaination")
+```
+
+### Explaination of SHAP
+
+-   [SHAP (SHapley Additive exPlanations) plots provide a visual representation of how individual features contribute to the prediction of a machine learning model. In this case, the values are provided in different percentiles (min, q1, median, mean, q3, max) of the SHAP distribution.]{style="font-size: 20px;"}
+
+## Summary
+
+[**Votes = 625924 -**]{style="font-size: 20px;"} [It has "Positive Impact" on the model's output on higher percentiles indicating that it contributes more on model's output.]{style="font-size: 18px;"}
+
+[**Release_Year = 1976 -**]{style="font-size: 20px;"} [It has "Positive Impact" on the model's output.]{style="font-size: 18px;"}
+
+[**Duration = 120 -**]{style="font-size: 20px;"} [It has "Positive Impact" on the model's output.]{style="font-size: 18px;"}
+
+[**Metascore = 70 -**]{style="font-size: 20px;"} [It has "Positive Impact" on the model's output.]{style="font-size: 18px;"}
+
+[**Movie_Name = Rocky -**]{style="font-size: 20px;"} [It has "Positive Impact" on the model's output.]{style="font-size: 18px;"}
+
+[**Genre = Drama, Sport -**]{style="font-size: 20px;"} [It has "Negative Impact" on the model's output.]{style="font-size: 18px;"}
+
+[**Director = John G. Avildsen -**]{style="font-size: 20px;"} [It has "Negative Impact" on the model's output.]{style="font-size: 18px;"}
+
+[**Cast = Sylvester Stallone -**]{style="font-size: 20px;"} [It has "Negative Impact" on the model's output.]{style="font-size: 18px;"}
+
+[**Gross = 117.24 -**]{style="font-size: 20px;"} [It has "Negative Impact" on the model's output.]{style="font-size: 18px;"}
+
+[SHAP values offer valuable insights into the contribution of each feature to the model's predictions, providing a deeper understanding of the decision-making process employed by the model.]{style="font-size: 20px;"}
+
+## Shut down h20
+
+```{r}
+h2o.shutdown(prompt = F)
+```

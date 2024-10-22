@@ -1,0 +1,318 @@
+---
+title: "Youtube - TedEx"
+author: "Group 2"
+output:
+  html_document:
+    theme: bootstrap
+    toc: true
+    toc_float: true
+---
+******
+
+# Team Members
+* **Abha Sharma (asharma69)**  
+* **Ayush Rishi (arishi1)**    
+* **Siddhesh More (smore1)**  
+* **Tejraj Pawar (tpawar1)**  
+* **Rishika Chhabria (rchhabria3)**  
+
+
+# Problem description
+
+* It is challenging to make informational videos interesting and engaging. Our project aims to perform a case study on one of the most successful informational YouTube channels with over 202,000 videos called TEDx. The goal is to figure out the characteristics that make TEDx so successful so that other informational content creators can apply the same techniques.  
+* The case study will aim to perform EDA on various engagement statistics like views, likes, comments, duration, tags, etc. Also, determine the top-performing videos and what makes them popular. Utilize Topic modeling ML models to identify prevalent themes or topics across TEDx videos.  
+
+
+# Data Summary  
+The dataset offers a comprehensive collection of TEDx talks from the TedEx YouTube channel, featuring talks aimed at inspiring, educating, and sparking discussions on various important subjects. Each entry includes details such as the video ID, publication time, title, description, tags, category ID, default audio language, duration, dimension, caption availability, licensed content status, view count, like count, favorite count, and comment count. The dataset offers insights into the content and engagement metrics of these TedEx talk videos , showcasing diverse topics and audience responses.  
+
+### Dataset [url](https://github.com/rishikachhabria/Youtube-TedEx-Group2/blob/main/Youtube-TedEx-Group2-Data.zip)  
+
+# Data Exploration
+```{r setup, include=FALSE}
+
+if (!require('tidyverse')) install.packages('tidyverse'); library('tidyverse')
+if (!require('kableExtra')) install.packages('kableExtra'); library('kableExtra')
+if (!require('ggplot2')) install.packages('ggplot2'); library('ggplot2')
+if (!require('ggthemes')) install.packages('ggthemes'); library('ggthemes')
+if (!require('skimr')) install.packages('skimr'); library('skimr')
+if (!require('plot3D')) install.packages('plot3D'); library('plot3D')
+if (!require('plotrix')) install.packages('plotrix'); library('plotrix')
+if (!require('viridis')) install.packages('viridis'); library('viridis')
+if (!require('wordcloud')) install.packages('wordcloud'); library('wordcloud')
+if (!require('gganimate')) install.packages('gganimate'); library('gganimate')
+if (!require('scales')) install.packages('scales'); library('scales')
+if (!require('kableExtra')) install.packages('kableExtra'); library('kableExtra')
+```
+
+
+### Reading the post processed data
+```{r reading the csv, message=FALSE, warning = FALSE}
+yt_df <- readRDS("processed_youtube_df.rds")
+
+
+summary(yt_df)
+glimpse(yt_df)
+
+```
+
+
+### Any relation between views and likes ?
+```{r plot-example, message=FALSE, warning = FALSE}
+
+data_check <- yt_df |> select(-Description)
+
+ggplot(data_check, aes(x = View_Count/1e6, y = Like_Count/1e3, color = factor(Day_Of_Week))) +
+  geom_point()+
+  scale_x_continuous(labels = scales::comma) + 
+  scale_y_continuous(labels = scales::comma) + 
+  labs(x= 'Views (in millions )', y = 'Likes (in thousands)', title = 'Scatter plot for views and likes comparison') +
+  theme_bw() 
+
+```
+
+### Languages for uploaded videos
+```{r Language based bar chart, message=FALSE, warning = FALSE}
+#Language based bar and pie chart
+language_yt_df <- yt_df |> 
+  group_by(Default_Audio_Language) |>
+  summarise(n = n()) |> 
+  arrange(desc(n)) |> 
+  slice_head(n = 10)
+
+language_lookup <- data.frame(Language_Code = c("ar","en", "es", "fr", "hi","it","pt","ro","tr","zh-CN"),
+                              Language_Name = c("Arabic","English", "Spanish", "French", "Hindi","Italian","Portuguese","Romanian","Turkish","Chinese (PRC)"))
+
+
+language_yt_df <- merge(language_yt_df, language_lookup, by.x = "Default_Audio_Language", by.y = "Language_Code", all.x = TRUE)
+
+#bar chart
+ggplot(language_yt_df) +
+  geom_bar(aes(x = Default_Audio_Language, y = n, fill = Default_Audio_Language), stat = 'identity') +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = 'Language', y = 'Frequency', title = 'Top 10 languages') +
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.text.x = element_text(hjust = 1),
+        legend.title = element_blank()) +
+  scale_fill_discrete(name = "Language", labels = paste(language_yt_df$Default_Audio_Language, ":", language_yt_df$Language_Name))
+```
+
+### Daily video uploads:
+```{r Day based bar chart, message=FALSE, warning = FALSE}
+days_df <- yt_df |> group_by(Day_Of_Week) |>
+  summarise(n = n())|>
+  mutate(percentage = round(n / sum(n), 2)) |>
+  mutate(label_perc = scales::percent(percentage))
+
+
+
+ggplot(days_df, aes(x = "", y = percentage, fill = Day_Of_Week)) +
+  geom_col(color = "black") +
+  geom_label(aes(label = label_perc),
+             position = position_stack(vjust = 0.5),
+             show.legend = FALSE) +
+  guides(fill = guide_legend(title = "Exploring Daily Data")) +
+  coord_polar(theta = "y") +
+  theme_void()
+```
+
+
+
+### Time period for video upload:
+```{r Most uploaded at which time, message=FALSE, warning = FALSE}
+#Most uploaded at which time
+
+time_df <- yt_df |> group_by(Utc_Day_Part) |>
+  summarise(n = n()) |>
+  mutate(percentage = n / sum(n)) |>
+  mutate(label_perc = scales::percent(percentage))
+
+
+#pie chart distribution
+pie3D(time_df$percentage,
+      col = hcl.colors(length(time_df$percentage), "Spectral"),
+      labels = paste(time_df$Utc_Day_Part, time_df$label_perc),
+      explode = 0.3, labelcex = 0.8, theta = 1)
+      
+legend("topleft", legend = time_df$Utc_Day_Part,
+       fill = hcl.colors(length(time_df$percentage), "Spectral"),
+       title = "Times of (the) day", horiz = FALSE, xpd = TRUE, inset = c(1, -0.2))
+
+
+
+      
+```
+
+
+
+### Most viewed videos:
+```{r most viewed videos, message=FALSE, warning = FALSE}
+mvideo <- yt_df |> select(-Description) |> arrange(desc(yt_df$View_Count)) 
+
+top_mvideo <- mvideo[1:10,]
+
+#Titles of most viewed videos
+ggplot(top_mvideo, aes(y = reorder(Title, View_Count),x = View_Count/1e6),stat = 'identity') +
+geom_point()+
+  labs(y= 'Video Titles', x = 'Views (in Millions)', title = 'Top 10 Most viewed videos') +
+  theme(plot.title = element_text(hjust = 5),
+        axis.text.x = element_text(hjust = 1))
+
+
+#time duration of most viewed videos
+ggplot(top_mvideo, aes(y=reorder(Title, Duration_minutes), x =Duration_minutes ), stat = 'identity') +
+  geom_point() +
+  labs(x= 'Video length (in mins)', y = 'Video Titles', title = 'Time duration for most viewed videos') +
+  theme(plot.title = element_text(hjust = 2),
+        axis.text.x = element_text(hjust = 1))
+
+
+```
+
+
+### Video Tags analysis:
+```{r Tags based bar chart, message=FALSE, warning = FALSE}
+#Top words in tags
+tag_df <- yt_df %>%
+  separate_rows(Tags, sep = ",") %>%
+  mutate(tags = str_replace_all(Tags, '"', "")) %>%
+  group_by(tags) %>%
+  summarise(n = n()) %>%
+  filter(!(tags %in% c("s", "the", "The", "and", "or", "a", "-", "","English")))
+
+
+wordcloud(words = tag_df$tags, freq = tag_df$n, max.words = 100, random.order = FALSE,
+          colors=brewer.pal(6, "Dark2"))
+
+#Tags of most viewed videos
+tag_mvideos <- top_mvideo |>
+    separate_rows(Tags, sep = ",") %>%
+    mutate(tags_col = str_replace_all(Tags, '"', "")) %>%
+    group_by(tags_col) %>%
+    summarise(n = n()) %>%
+    filter(n > 2, !(tags_col %in% c("s", "the", "The", "and", "or", "a", "-", "", "English")))
+
+ggplot(tag_mvideos) +
+    geom_bar(aes(x=reorder(tags_col, -n), y = n, fill = tags_col), stat = 'identity') +
+    labs(x= 'Tags', y = 'Frequency', title = 'Top 5 Tags for most viewed videos') +
+    theme(plot.title = element_text(hjust = 0.5),
+          axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+### Engagement metrics calculation:
+```{r engagement metrics, message=FALSE, warning = FALSE}
+
+emetrics_df <- yt_df |>
+  select(Like_Count,Comment_Count,View_Count,Duration_minutes,Utc_Day_Part, Day_Of_Week,) |>
+  mutate(Engagement_Rate = ((Like_Count + Comment_Count) / View_Count) * 100) |>
+  mutate(week_index = case_when(
+    Day_Of_Week == "Monday" ~ 1,
+    Day_Of_Week == "Tuesday" ~ 2,
+    Day_Of_Week == "Wednesday" ~ 3,
+    Day_Of_Week == "Thursday" ~ 4, Day_Of_Week == "Friday" ~ 5, Day_Of_Week == "Saturday" ~ 6, 
+    Day_Of_Week == "Sunday" ~ 7
+    ))
+
+
+  ggplot(emetrics_df,  aes(x=Duration_minutes, y=Engagement_Rate, color=Utc_Day_Part)) +
+    geom_line() +
+    geom_point() +
+    scale_color_viridis(discrete = TRUE) +
+    ggtitle("Engagement Rate by Video Duration") +
+    guides(color = guide_legend(title = "Times of (the) day")) +
+    labs("Engagement_Rate")
+    
+```
+
+```{r engagement metrics interactive, message=FALSE, warning = FALSE}
+
+ ggplot(emetrics_df,  aes(x=Day_Of_Week, y=Engagement_Rate, group=Duration_minutes, color=Duration_minutes)) +
+    geom_line() +
+    geom_point() +
+    scale_color_viridis(discrete = FALSE) +
+    ggtitle("Daily Engagement Rate") +
+    labs(
+    x = "Days (of week)",
+    y = "Rate of Engagement (in %)"  )
+
+
+```
+
+
+### EDA Summary: 
+- There appears to be no correlation between views and likes, suggesting that the most viewed videos may not necessarily be the most liked ones.
+- English is the most frequently used language for video uploads, followed by Spanish.
+- Video uploads are more common on weekdays compared to weekends.
+- The majority of videos are uploaded during the afternoon (UTC), accounting for nearly 80% of uploads, followed by the evening (UTC) with approximately 19%.
+- The top 10 most viewed videos attract viewership ranging from 5 to 25 million, with duration spanning from approximately 6 to 30 minutes.
+- Tags such as "Life," "Empowerment," "Happiness," "Health," and "Leadership" are popular among the most viewed videos.
+- According to engagement metrics, videos uploaded during the afternoon (UTC) with duration ranging from 10 to 15 minutes tend to receive the highest engagement.  
+- Additionally, the data suggests that videos uploaded on Thursdays generally have the highest engagement rates, followed by those uploaded on Mondays.
+
+
+## AI/ML procedure summary
+
+## Important Libraries
+
+```{r Libraries}
+library(h2o)
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(skimr)
+library(recipes)
+library(kableExtra)
+library(DALEXtra)
+```
+
+## Split the Independent and dependent variable
+
+[Predictors in x_train_tbl]{style="font-size: 19px;"}
+
+```{r Split the data}
+x_train_tbl <- yt_df |> select(-"Utc_Day_Part")
+kable(head(x_train_tbl,10)) |> kable_styling(bootstrap_options = c("hover"))
+```
+
+[Outcome in y_train_tbl]{style="font-size: 19px;"}
+
+```{r}
+y_train_tbl <- yt_df |> select("Utc_Day_Part")
+kable(head(y_train_tbl,10) , align = 'l') |> kable_styling(bootstrap_options = c("hover"))
+```
+
+## Initialize H2O Model
+
+```{r}
+h2o.init()
+```
+
+```{r results = 'hide'}
+saved_model <- h2o.loadModel("dl-model.h2o")
+```
+
+### XAI (Expalinable AI)
+
+```{r results = 'hide'}
+h2o_exp = explain_h2o(
+saved_model, data = x_train_tbl,
+y = y_train_tbl$Utc_Day.Part == 1,
+label = "H2O", type = "regression")
+```
+
+### <u> XAI - Partial-dependence Profiles </u>
+
+```{r results = 'hide'}
+h2o_exp_pdp <- model_profile(
+explainer = h2o_exp, variables = "Metascore")
+```
+
+## Plot display for Partial dependence profiles
+
+```{r}
+plot(h2o_exp_pdp, geom="profiles") +
+ggtitle("Metascore")
+```
+
+## AI/ML result summary and discussion
